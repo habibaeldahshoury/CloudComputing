@@ -1,0 +1,11 @@
+const express = require('express');
+const { requireAuth, requireRole } = require('../middleware/auth');
+const controller = require('../controllers/donors');
+const router = express.Router();
+router.use(requireAuth, requireRole('donor'));
+router.post('/me', controller.createProfile);
+router.get('/me', controller.getProfile);
+router.put('/me', controller.updateProfile);
+router.get('/me/eligibility', controller.getEligibility);
+router.get('/me/donations', controller.listDonations);
+module.exports = router;
