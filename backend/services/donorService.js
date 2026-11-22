@@ -28,8 +28,6 @@ return rows[0] || null;
 }
 async function createDonor(id, { fullName, phone, bloodType, dateOfBirth }) {
 const rows = await sql`
-Student 2 Guide: Donor, Eligibility and Security Service
-Page 7 of 41
 INSERT INTO donors (id, full_name, phone, blood_type, date_of_birth)
 VALUES (${id}, ${fullName}, ${phone || null}, ${bloodType},
 ${dateOfBirth})
@@ -57,7 +55,7 @@ return rows[0] || null;
 
 async function getEligibility(donorId) {
 const rows = await sql`
-SELECT to_char(last_donation_date + ${ELIGIBILITY_DAYS}::int, 'YYYY-MMDD') AS "nextEligibleDate",
+SELECT to_char(last_donation_date + ${ELIGIBILITY_DAYS}::int, 'YYYY-MM-DD') AS "nextEligibleDate",
 (last_donation_date IS NULL
 OR last_donation_date + ${ELIGIBILITY_DAYS}::int <= CURRENT_DATE)
 AS eligible
