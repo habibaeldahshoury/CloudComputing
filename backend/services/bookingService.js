@@ -1,145 +1,108 @@
-const { neon } = require('@neondatabase/serverless');
-const sql = neon(process.env.DATABASE_URL);
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9af]{12}$/i;
-function isUuid(value) {
-return typeof value === 'string' && UUID_PATTERN.test(value);
-}
-// Is there already a booking (not cancelled) for this donor in this drive?
-async function findActiveBooking(donorId, driveId) {
-const rows = await sql`
-SELECT id FROM bookings
-WHERE donor_id = ${donorId} AND drive_id = ${driveId} AND status <>
-'cancelled'
-LIMIT 1`;
-return rows[0] || null;
-}
+const sql = require('../db/sql');
+const driveService = require('./driveService');
+  
+const toBooking = (r) => ({
+id: r.id, donorId: r.donor_id, driveId: r.drive_id, slotId: r.slot_id,
+status: r.status, createdAt: r.created_at, checkedInAt: r.checked_in_at
+});
+// take a seat first (atomic, Student 1), then save the booking
 async function createBooking(donorId, driveId, slotId) {
-const rows = await sql`
-INSERT INTO bookings (donor_id, drive_id, slot_id)
-VALUES (${donorId}, ${driveId}, ${slotId})
-RETURNING id, donor_id AS "donorId", drive_id AS "driveId", slot_id AS
-"slotId",
-status, created_at AS "createdAt"`;
-return rows[0];
+const seat = await driveService.reserveSeat(driveId, slotId);
+if (!seat.ok) return seat;
+try {
+const rows = await sql`INSERT INTO bookings (donor_id, drive_id, slot_id)
+VALUES (${donorId}, ${driveId}, ${slotId}) RETURNING *`;
+return { ok: true, booking: toBooking(rows[0]) };
+} catch (err) {
+await driveService.releaseSeat(slotId); // undo the seat
+if (err.code === '23505') return { ok: false, reason: 'ALREADY_BOOKED' };
+throw err;
+}
 }
 async function getBooking(id) {
-if (!isUuid(id)) return null;
-const rows = await sql`
-SELECT id, donor_id AS "donorId", drive_id AS "driveId", slot_id AS
-"slotId", status
-FROM bookings WHERE id = ${id}`;
-return rows[0] || null;
+const rows = await sql`SELECT * FROM bookings WHERE id = ${id}`;
+return rows[0] ? toBooking(rows[0]) : null;
 }
-async function listMyBookings(donorId) {
-return sql`
-SELECT b.id, b.status,
-d.id AS "driveId", d.title AS "driveTitle", d.venue,
-to_char(d.drive_date, 'YYYY-MM-DD') AS "driveDate",
-s.id AS "slotId", LEFT(s.start_time::text, 5) AS "startTime",
-LEFT(s.end_time::text, 5) AS "endTime"
+async function listByDonor(donorId) {
+const rows = await sql`SELECT b.id, b.status, d.title, d.venue, d.city,
+d.drive_date::text AS drive_date, s.start_time::text AS start_time,
+s.end_time::text AS end_time
 FROM bookings b
 JOIN drives d ON d.id = b.drive_id
 JOIN time_slots s ON s.id = b.slot_id
 WHERE b.donor_id = ${donorId}
 ORDER BY d.drive_date DESC, s.start_time`;
+return rows.map((r) => ({
+id: r.id, status: r.status, title: r.title, venue: r.venue, city: r.city,
+driveDate: String(r.drive_date).slice(0, 10),
+startTime: String(r.start_time).slice(0, 5), endTime:
+String(r.end_time).slice(0, 5)
+}));
 }
-async function listDriveBookings(driveId) {
-return sql`
-SELECT b.id, b.status, b.donor_id AS "donorId",
-dn.full_name AS "donorName", dn.blood_type AS "bloodType", u.email
-AS "donorEmail",
-LEFT(s.start_time::text, 5) AS "startTime", LEFT(s.end_time::text,
-5) AS "endTime"
+async function listByDrive(driveId) {
+const rows = await sql`SELECT b.id, b.status, dn.full_name, dn.blood_type,
+u.email, s.start_time::text AS start_time, s.end_time::text AS end_time
 FROM bookings b
 JOIN donors dn ON dn.id = b.donor_id
-JOIN users u ON u.id = b.donor_id
+JOIN users u ON u.id = dn.user_id
 JOIN time_slots s ON s.id = b.slot_id
-WHERE b.drive_id = ${driveId}
-ORDER BY s.start_time, dn.full_name`;
+WHERE b.drive_id = ${driveId} AND b.status <> 'cancelled'
+ORDER BY s.start_time`;
+return rows.map((r) => ({
+id: r.id, status: r.status, fullName: r.full_name, bloodType:
+r.blood_type, email: r.email,
+startTime: String(r.start_time).slice(0, 5), endTime:
+String(r.end_time).slice(0, 5)
+}));
 }
-// Only a booking that is still 'booked' can be cancelled. Returns the slot to give back.
+// only a booking that is still 'booked' can be cancelled or checked in
 async function cancelBooking(id) {
-const rows = await sql`
-UPDATE bookings SET status = 'cancelled'
-WHERE id = ${id} AND status = 'booked'
-RETURNING slot_id AS "slotId"`;
-return rows[0] || null;
+const rows = await sql`UPDATE bookings SET status = 'cancelled'
+WHERE id = ${id} AND status = 'booked' RETURNING *`;
+return rows[0] ? toBooking(rows[0]) : null;
 }
-
-// outcome is 'attended' or 'no_show'. Only a 'booked' booking can be checked in.
-async function checkIn(id, outcome) {
-const rows = await sql`
-UPDATE bookings SET status = ${outcome}, checked_in_at = now()
-WHERE id = ${id} AND status = 'booked'
-RETURNING id, donor_id AS "donorId", drive_id AS "driveId", status,
-checked_in_at AS "checkedInAt"`;
-return rows[0] || null;
+async function checkIn(id, status) {
+const rows = await sql`UPDATE bookings SET status = ${status},
+checked_in_at = now()
+WHERE id = ${id} AND status = 'booked' RETURNING *`;
+return rows[0] ? toBooking(rows[0]) : null;
 }
-// Used by Student 1's turnout report.
 async function getDriveCounts(driveId) {
-const rows = await sql`
-SELECT count(*) FILTER (WHERE status = 'booked') AS booked,
-count(*) FILTER (WHERE status = 'attended') AS attended,
-count(*) FILTER (WHERE status = 'no_show') AS "noShow",
-count(*) FILTER (WHERE status = 'cancelled') AS cancelled
-FROM bookings WHERE drive_id = ${driveId}`;
-const row = rows[0];
-return {
-booked: Number(row.booked),
-attended: Number(row.attended),
-noShow: Number(row.noShow),
-cancelled: Number(row.cancelled)
-};
+const rows = await sql`SELECT status, count(*)::int AS n FROM bookings
+WHERE drive_id = ${driveId} GROUP BY status`;
+const counts = { booked: 0, attended: 0, noShow: 0, cancelled: 0 };
+for (const r of rows) {
+if (r.status === 'no_show') counts.noShow = r.n;
+else counts[r.status] = r.n;
 }
-// ---- reminders ----
-// One reminder, due at 09:00 Cairo time on the day before the drive.
-async function createReminder(bookingId) {
-await sql`
-INSERT INTO reminders (booking_id, send_at)
-SELECT b.id, ((d.drive_date - 1) + TIME '09:00') AT TIME ZONE
-'Africa/Cairo'
-FROM bookings b JOIN drives d ON d.id = b.drive_id
-WHERE b.id = ${bookingId}`;
+return counts;
 }
-async function getEmailInfo(bookingId) {
-const rows = await sql`
-SELECT u.email AS "to", d.title, d.venue,
-
-to_char(d.drive_date, 'YYYY-MM-DD') AS "driveDate",
-LEFT(s.start_time::text, 5) AS "startTime"
-FROM bookings b
-JOIN drives d ON d.id = b.drive_id
-JOIN time_slots s ON s.id = b.slot_id
-JOIN users u ON u.id = b.donor_id
-WHERE b.id = ${bookingId}`;
-return rows[0] || null;
-}
-// Pending reminders whose time has come, for bookings that are still active.
+// bookings whose drive is tomorrow and that have no reminder yet
 async function findDueReminders() {
-return sql`
-SELECT r.id AS "reminderId", u.email AS "to", d.title, d.venue,
-to_char(d.drive_date, 'YYYY-MM-DD') AS "driveDate",
-LEFT(s.start_time::text, 5) AS "startTime"
-FROM reminders r
-JOIN bookings b ON b.id = r.booking_id
+const rows = await sql`SELECT b.id AS booking_id, u.email, d.title,
+d.venue, d.drive_date::text AS drive_date, s.start_time::text AS start_time
+FROM bookings b
+JOIN donors dn ON dn.id = b.donor_id
+JOIN users u ON u.id = dn.user_id
 JOIN drives d ON d.id = b.drive_id
 JOIN time_slots s ON s.id = b.slot_id
-JOIN users u ON u.id = b.donor_id
-WHERE r.status = 'pending' AND r.send_at <= now()
-AND b.status = 'booked' AND d.drive_date >= CURRENT_DATE
-ORDER BY r.send_at
-LIMIT 20`;
+WHERE b.status = 'booked' AND d.status = 'open'
+AND d.drive_date = CURRENT_DATE + 1
+AND NOT EXISTS (SELECT 1 FROM reminders r WHERE r.booking_id = b.id)`;
+return rows.map((r) => ({
+bookingId: r.booking_id, email: r.email, title: r.title, venue: r.venue,
+driveDate: String(r.drive_date).slice(0, 10), startTime:
+String(r.start_time).slice(0, 5)
+}));
 }
-async function markReminderSent(id) {
-await sql`UPDATE reminders SET status = 'sent', sent_at = now() WHERE id =
-${id}`;
+async function addReminder(bookingId) {
+await sql`INSERT INTO reminders (booking_id) VALUES (${bookingId})`;
 }
-async function markReminderFailed(id) {
-await sql`UPDATE reminders SET status = 'failed' WHERE id = ${id}`;
+async function markReminder(bookingId, status) {
+await sql`UPDATE reminders SET status = ${status},
+sent_at = CASE WHEN ${status} = 'sent' THEN now() ELSE NULL END
+WHERE booking_id = ${bookingId}`;
 }
-module.exports = {
-isUuid, findActiveBooking, createBooking, getBooking, listMyBookings,
-listDriveBookings, cancelBooking, checkIn, getDriveCounts,
-createReminder, getEmailInfo, findDueReminders, markReminderSent,
-markReminderFailed
-};
+module.exports = { createBooking, getBooking, listByDonor, listByDrive,
+cancelBooking, checkIn,
+getDriveCounts, findDueReminders, addReminder, markReminder };

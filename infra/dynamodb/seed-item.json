@@ -1,0 +1,8 @@
+{
+  "id": { "S": "ISS-101" },
+  "title": { "S": "Unable to access Wi-Fi" },
+  "description": { "S": "Connection fails in the teaching lab." },
+  "priority": { "S": "High" },
+  "status": { "S": "Open" },
+  "createdAt": { "S": "2026-09-01T09:00:00.000Z" }
+}

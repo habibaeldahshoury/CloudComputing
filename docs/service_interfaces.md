@@ -1,38 +1,40 @@
-Owner File and function Returns Used by you
-for
-Student
-2
-middleware/auth.js : requireAuth Reads
-Authorization:
-Bearer <token> ,
-checks it with
-JWT_SECRET , sets
-req.user = { id,
-role } ; answers 401
-UNAUTHORIZED
-otherwise
-Knowing
-who is calling
+Owner File and function Returns You use it to
 Student
 2
 middleware/auth.js :
-requireRole('donor') , also
-requireRole('donor','organizer')
+requireAuth
+Reads Authorization:
+Bearer <token> , checks
+it, sets req.user = {
+id, role, email } ,
+otherwise answers 401
+Know who is
+calling
+Student
+2
+middleware/auth.js :
+requireRole('donor')
 Passes the right role,
-answers 403
-FORBIDDEN otherwise
+otherwise 403
 Role checks
 Student
 2
 services/donorService.js :
+getDonorByUserId(userId)
+{ id, fullName,
+bloodType } or null
+Find the
+donor profile
+of a login
+Student
+2
+services/donorService.js :
 getEligibility(donorId)
-null if no donor
-profile, else {
-eligible,
+{ eligible,
 nextEligibleDate }
-where the date is
-YYYY-MM-DD or null
-Refusing
+(the date is YYYY-MM-DD
+or null )
+Refuse
 ineligible
 donors
 Student
@@ -40,9 +42,8 @@ Student
 services/donorService.js :
 recordDonation({ donorId,
 driveId, bookingId })
-Saves a donation
-dated today and
-updates the donor's
+Saves a donation dated
+today and updates the
 last donation date
 Check-in as
 attended
@@ -51,38 +52,43 @@ Student
 services/driveService.js :
 getDrive(driveId)
 { id, organizerId,
-title, venue,
-driveDate, status
-} or null
-Checking
-the organizer
-owns the
-drive
+title, venue, city,
+driveDate, status }
+or null
+Check the
+drive and its
+owner
+Student
+1
+services/driveService.js :
+listSlots(driveId)
+Array of { id,
+startTime, endTime,
+capacity, bookedCount
+}
+Put the time
+in the email
 Student
 1
 services/driveService.js :
 reserveSeat(driveId, slotId)
-{ ok: true } or {
-ok: false, reason
-} with reason
-NOT_FOUND , FULL or
-DRIVE_CLOSED
-Taking a seat
+{ ok: true } or { ok:
+false, reason } ,
+reason is NOT_FOUND ,
+FULL or DRIVE_CLOSED
+Take a seat,
 atomically
 Student
 1
 services/driveService.js :
 releaseSeat(slotId)
-Nothing Giving the
-seat back on
+nothing Give the seat
+back on
 cancel
-Owner File and function Returns Used by you
-for
 You services/bookingService.js :
 getDriveCounts(driveId)
-{ booked,
-attended, noShow,
-cancelled }
+{ booked, attended,
+noShow, cancelled }
 Student 1's
 turnout
 report
