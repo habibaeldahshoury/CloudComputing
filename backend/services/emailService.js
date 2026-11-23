@@ -1,44 +1,21 @@
 async function sendEmail(to, subject, text) {
-if (!process.env.EMAIL_API_KEY) {
-throw new Error('EMAIL_API_KEY is not set');
-}
-const response = await fetch('https://api.resend.com/emails', {
+const res = await fetch('https://api.resend.com/emails', {
 method: 'POST',
-headers: {
-Authorization: `Bearer ${process.env.EMAIL_API_KEY}`,
-'Content-Type': 'application/json'
-},
-body: JSON.stringify({
-from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
-to: [to],
-subject,
-text
-}),
-signal: AbortSignal.timeout(8000) // never hang the serverless function
+headers: { Authorization: `Bearer ${process.env.EMAIL_API_KEY}`,
+'Content-Type': 'application/json' },
+body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [to], subject,
+text })
 });
-if (!response.ok) {
-throw new Error(`Email API returned ${response.status}`);
+if (!res.ok) throw new Error('Email API answered ' + res.status);
 }
-return response.json();
+function bookingText(job) {
+return `Hello,\n\nYour blood donation is booked.\nDrive:
+${job.title}\nPlace: ${job.venue}\nDate: ${job.driveDate}\nTime:
+${job.startTime}\n\nThank you!`;
 }
-function describe(info) {
-const when = `${info.driveDate} at ${info.startTime}`;
-return `${info.title}\n${info.venue}\nTime: ${when}`;
+function reminderText(job) {
+return `Reminder: your blood donation is TOMORROW.\nDrive:
+${job.title}\nPlace: ${job.venue}\nTime: ${job.startTime}\n\nPlease eat well
+and drink water.`;
 }
-async function sendConfirmationEmail(info) {
-return sendEmail(
-info.to,
-'Your blood donation booking is confirmed',
-`Hello ${info.donorName},\n\nYour booking is
-confirmed.\n\n${describe(info)}\n\nThank you for donating.`
-);
-}
-async function sendReminderEmail(info) {
-return sendEmail(
-info.to,
-'Reminder: your blood donation is tomorrow',
-`Hello ${info.donorName},\n\nA reminder of your
-booking.\n\n${describe(info)}`
-);
-}
-module.exports = { sendEmail, sendConfirmationEmail, sendReminderEmail };
+module.exports = { sendEmail, bookingText, reminderText };
