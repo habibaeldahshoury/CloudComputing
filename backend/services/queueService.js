@@ -1,5 +1,5 @@
 const { SQSClient, GetQueueUrlCommand, SendMessageCommand,
-ReceiveMessageCommand, DeleteMessageCommand } = require('@aws-sdk/clientsqs');
+ReceiveMessageCommand, DeleteMessageCommand } = require('@aws-sdk/client-sqs');
 const sqs = new SQSClient({ region: 'us-east-1' });
 let queueUrl;
 async function getUrl() {
